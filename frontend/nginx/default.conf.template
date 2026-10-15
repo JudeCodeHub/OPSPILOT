@@ -1,0 +1,58 @@
+# Rendered by the nginx image entrypoint: ${API_UPSTREAM} is substituted from
+# the environment (default http://gateway:8080). Other $variables are left alone.
+
+server {
+    listen 8080;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    server_tokens off;
+
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json image/svg+xml;
+
+    # Security headers. Kept at server level only: an add_header inside a
+    # location would drop these, so locations use `expires` for caching.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # API calls go to the gateway (Compose). In Kubernetes the ingress routes
+    # /api straight to the gateway and this block is not used.
+    location /api/ {
+        proxy_pass ${API_UPSTREAM};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 3s;
+        proxy_read_timeout 15s;
+    }
+
+    # Hashed build assets never change: cache for a year.
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    # index.html must always be revalidated so new releases are picked up.
+    location = /index.html {
+        expires -1;
+    }
+
+    # SPA fallback: unknown paths render the app, which shows its own 404.
+    location / {
+        expires -1;
+        try_files $uri /index.html;
+    }
+}

@@ -1,18 +1,43 @@
+# Markdown docs — kept local only, not committed
+*.md
+
 # Go
 bin/
 *.exe
 *.test
 *.out
+*.prof
+coverage.*
 vendor/
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.tsbuildinfo
+.vite/
+*.local
+
+# Logs
+*.log
+logs/
+npm-debug.log*
 
 # Secrets — never commit these
 .env
 *.env
 !.env.example
 *.pem
+*.key
 kubeconfig*
 
 # Editor / OS
 .vscode/
 .idea/
+*.swp
+*.sw?
 .DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json

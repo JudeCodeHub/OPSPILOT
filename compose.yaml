@@ -1,0 +1,271 @@
+# OpsPilot demo app — local run.
+#
+#   docker compose up -d --build
+#   open http://localhost:3000        (frontend)
+#   curl http://localhost:8000/api/events   (gateway)
+#
+# Failure scenarios: set a variable in .env (see .env.example) or edit the
+# default below, then recreate just that service, e.g.
+#   PAYMENT_FAIL_RATE=0.5 docker compose up -d payment
+
+name: opspilot
+
+# ---- shared fragments ---------------------------------------------------------
+
+x-go-build: &go-build
+  context: ./services
+  dockerfile: Dockerfile
+
+x-go-service: &go-service
+  restart: unless-stopped
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  healthcheck:
+    # distroless has no shell or curl; the binary probes its own /healthz.
+    test: ["CMD", "/app", "healthcheck"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+    start_period: 10s
+  deploy:
+    resources:
+      limits: { memory: 96M, cpus: "1.0" }
+
+x-common-env: &common-env
+  PORT: "8080"
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  SHUTDOWN_TIMEOUT: 10s
+  STARTUP_RETRIES: "5"
+  STARTUP_RETRY_DELAY: 2s
+
+x-migrated: &migrated
+  condition: service_completed_successfully
+x-healthy: &healthy
+  condition: service_healthy
+
+services:
+  # ---- infrastructure ---------------------------------------------------------
+
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: opspilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opspilot}
+      POSTGRES_DB: opspilot
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=100"]
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opspilot -d opspilot"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 256M }
+
+  redis:
+    image: redis:8.8.3-alpine
+    restart: unless-stopped
+    # Holds are short-lived; no persistence needed. noeviction: never drop a hold silently.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "48mb", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 64M }
+
+  nats:
+    image: nats:2.15.1-alpine
+    restart: unless-stopped
+    # -js: JetStream, -sd: storage dir, -m: monitoring port (consumer backlog: /jsz?consumers=true)
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    volumes:
+      - natsdata:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8222/healthz?js-enabled-only=true"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { memory: 128M }
+
+  # ---- one-shot migration -----------------------------------------------------
+
+  migrate:
+    build: { <<: *go-build, args: { SERVICE: migrate } }
+    image: opspilot/migrate:dev
+    restart: "no"
+    read_only: true
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      <<: *common-env
+      SERVICE_NAME: migrate
+      DATABASE_URL: postgres://opspilot:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/opspilot?sslmode=disable
+    depends_on:
+      postgres: *healthy
+    deploy:
+      resources:
+        limits: { memory: 64M }
+
+  # ---- application services ---------------------------------------------------
+
+  gateway:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: gateway } }
+    image: opspilot/gateway:dev
+    ports:
+      - "127.0.0.1:8000:8080"
+    environment:
+      <<: *common-env
+      SERVICE_NAME: gateway
+      EVENTS_URL: http://events:8080
+      BOOKING_URL: http://booking:8080
+      TICKETING_URL: http://ticketing:8080
+      UPSTREAM_TIMEOUT: ${GATEWAY_UPSTREAM_TIMEOUT:-3s}
+      CORS_ALLOWED_ORIGIN: http://localhost:5173
+      # failure switches
+      FAIL_RATE: ${GATEWAY_FAIL_RATE:-0}
+      SLOW_MS: ${GATEWAY_SLOW_MS:-0}
+      LEAK_MEMORY: ${GATEWAY_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${GATEWAY_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${GATEWAY_CPU_BURN:-false}
+    depends_on:
+      migrate: *migrated
+
+  events:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: events } }
+    image: opspilot/events:dev
+    environment:
+      <<: *common-env
+      SERVICE_NAME: events
+      DATABASE_URL: postgres://opspilot:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/opspilot?sslmode=disable
+      REDIS_ADDR: redis:6379
+      # failure switches
+      SLOW_QUERY_MS: ${EVENTS_SLOW_QUERY_MS:-0}
+      FAIL_RATE: ${EVENTS_FAIL_RATE:-0}
+      SLOW_MS: ${EVENTS_SLOW_MS:-0}
+      LEAK_MEMORY: ${EVENTS_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${EVENTS_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${EVENTS_CPU_BURN:-false}
+    depends_on:
+      postgres: *healthy
+      redis: *healthy
+      migrate: *migrated
+
+  booking:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: booking } }
+    image: opspilot/booking:dev
+    environment:
+      <<: *common-env
+      SERVICE_NAME: booking
+      # Crashloop scenario: BOOKING_DB_HOST=postgres-wrong
+      DATABASE_URL: postgres://opspilot:${POSTGRES_PASSWORD:-opspilot}@${BOOKING_DB_HOST:-postgres}:5432/opspilot?sslmode=disable
+      REDIS_ADDR: redis:6379
+      NATS_URL: nats://nats:4222
+      PAYMENT_URL: http://payment:8080
+      PAYMENT_TIMEOUT: ${BOOKING_PAYMENT_TIMEOUT:-2s}
+      HOLD_TTL_SECONDS: ${BOOKING_HOLD_TTL_SECONDS:-300}
+      # failure switches
+      DB_POOL_MAX: ${BOOKING_DB_POOL_MAX:-10}
+      FAIL_RATE: ${BOOKING_FAIL_RATE:-0}
+      SLOW_MS: ${BOOKING_SLOW_MS:-0}
+      LEAK_MEMORY: ${BOOKING_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${BOOKING_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${BOOKING_CPU_BURN:-false}
+    depends_on:
+      postgres: *healthy
+      redis: *healthy
+      nats: *healthy
+      migrate: *migrated
+
+  payment:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: payment } }
+    image: opspilot/payment:dev
+    environment:
+      <<: *common-env
+      SERVICE_NAME: payment
+      # failure switches
+      FAIL_RATE: ${PAYMENT_FAIL_RATE:-0}
+      SLOW_MS: ${PAYMENT_SLOW_MS:-0}
+      LEAK_MEMORY: ${PAYMENT_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${PAYMENT_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${PAYMENT_CPU_BURN:-false}
+    depends_on:
+      migrate: *migrated
+
+  ticketing:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: ticketing } }
+    image: opspilot/ticketing:dev
+    environment:
+      <<: *common-env
+      SERVICE_NAME: ticketing
+      DATABASE_URL: postgres://opspilot:${POSTGRES_PASSWORD:-opspilot}@postgres:5432/opspilot?sslmode=disable
+      NATS_URL: nats://nats:4222
+      # failure switches
+      PROCESS_DELAY_MS: ${TICKETING_PROCESS_DELAY_MS:-0}
+      FAIL_RATE: ${TICKETING_FAIL_RATE:-0}
+      SLOW_MS: ${TICKETING_SLOW_MS:-0}
+      LEAK_MEMORY: ${TICKETING_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${TICKETING_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${TICKETING_CPU_BURN:-false}
+    depends_on:
+      postgres: *healthy
+      nats: *healthy
+      migrate: *migrated
+    deploy:
+      resources:
+        limits: { memory: 128M, cpus: "1.0" }
+
+  notify:
+    <<: *go-service
+    build: { <<: *go-build, args: { SERVICE: notify } }
+    image: opspilot/notify:dev
+    environment:
+      <<: *common-env
+      SERVICE_NAME: notify
+      NATS_URL: nats://nats:4222
+      # failure switches
+      PAUSE_CONSUMER: ${NOTIFY_PAUSE_CONSUMER:-false}
+      FAIL_RATE: ${NOTIFY_FAIL_RATE:-0}
+      SLOW_MS: ${NOTIFY_SLOW_MS:-0}
+      LEAK_MEMORY: ${NOTIFY_LEAK_MEMORY:-false}
+      LEAK_MB_PER_MIN: ${NOTIFY_LEAK_MB_PER_MIN:-20}
+      CPU_BURN: ${NOTIFY_CPU_BURN:-false}
+    depends_on:
+      nats: *healthy
+      migrate: *migrated
+
+  # ---- frontend ---------------------------------------------------------------
+
+  frontend:
+    build: { context: ./frontend }
+    image: opspilot/frontend:dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:8080"
+    environment:
+      API_UPSTREAM: http://gateway:8080
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      gateway: *healthy
+    deploy:
+      resources:
+        limits: { memory: 32M }
+
+volumes:
+  pgdata:
+  natsdata:
