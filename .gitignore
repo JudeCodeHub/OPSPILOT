@@ -1,0 +1,18 @@
+# Go
+bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Secrets — never commit these
+.env
+*.env
+!.env.example
+*.pem
+kubeconfig*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
