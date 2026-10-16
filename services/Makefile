@@ -8,7 +8,9 @@ LDFLAGS := -s -w \
 
 COMPOSE := docker compose -f ../compose.yaml
 
-.PHONY: build test vet docker up down $(addprefix docker-,$(SERVICES))
+# docker-<service> targets are NOT listed here: make skips pattern rules
+# (docker-%) for .PHONY targets, which would leave them with no recipe.
+.PHONY: build test vet docker up down
 
 ## build: compile every service into ./bin
 build:
@@ -32,7 +34,8 @@ docker: $(addprefix docker-,$(SERVICES))
 docker-%:
 	docker build -f Dockerfile \
 		--build-arg SERVICE=$* --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
-		-t opspilot/$*:dev .
+		-t opspilot/$*:$(COMMIT) .
+
 
 ## up: build and start the whole app with Docker Compose
 up:
