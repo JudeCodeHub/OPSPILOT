@@ -1,0 +1,82 @@
+# Headless Service: stable DNS name "postgres.data.svc", no load balancing.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: data
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: opspilot
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: data
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/part-of: opspilot
+spec:
+  serviceName: postgres          # ties pod DNS names to the headless Service
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/part-of: opspilot
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.6-alpine          # same pinned version as Compose
+          args: ["-c", "shared_buffers=64MB", "-c", "max_connections=100"]
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: opspilot
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: postgres-auth, key: username }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres-auth, key: password }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql   # Postgres 18 image layout
+          # Ready = accepting connections. Services wait for this.
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d opspilot"]
+            periodSeconds: 5
+          # Alive = the port answers. Kept simpler and slower than readiness,
+          # so a busy database is not restarted by mistake.
+          livenessProbe:
+            tcpSocket:
+              port: 5432
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+  # One disk per pod, kept even if the pod is deleted.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi

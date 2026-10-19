@@ -1,0 +1,15 @@
+# Namespaces for the demo app. monitoring, argocd and opspilot-agent
+# are created later by the tools that live in them.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: opspilot
+  labels:
+    app.kubernetes.io/part-of: opspilot
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    app.kubernetes.io/part-of: opspilot
