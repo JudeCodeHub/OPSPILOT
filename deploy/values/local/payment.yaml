@@ -1,0 +1,11 @@
+# payment — values for the generic service chart (deploy/charts/service).
+image:
+  repository: registry.localhost:5000/payment
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  # failure switches (defaults = healthy)
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  CPU_BURN: "false"

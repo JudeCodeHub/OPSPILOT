@@ -1,0 +1,20 @@
+# Defaults for every OpsPilot Go service. Each service's values file
+# (deploy/values/<env>/<service>.yaml) overrides only what differs.
+
+image:
+  repository: registry.localhost:5000/payment   # override per service
+  tag: ""                                        # required: the git short SHA
+
+replicas: 1
+port: 8080
+
+# Non-secret settings -> ConfigMap -> env vars. Break switches live here.
+env: {}
+
+# Secret settings, read from existing Kubernetes Secrets:
+#   - { name: PGPASSWORD, secret: postgres-auth, key: password }
+secretEnv: []
+
+resources:
+  requests: { cpu: 50m, memory: 32Mi }
+  limits: { memory: 96Mi }
