@@ -1,0 +1,42 @@
+# One-shot: create tables + seed data, then exit. Safe to run again.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+  namespace: opspilot
+  labels:
+    app.kubernetes.io/name: migrate
+    app.kubernetes.io/part-of: opspilot
+spec:
+  backoffLimit: 3                 # retry a few times, then fail loudly
+  activeDeadlineSeconds: 300      # never hang forever
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: migrate
+        app.kubernetes.io/part-of: opspilot
+    spec:
+      restartPolicy: Never        # a failed try becomes a new pod (easy to read its logs)
+      containers:
+        - name: migrate
+          image: registry.localhost:5000/migrate:60e03da
+          env:
+            - name: SERVICE_NAME
+              value: migrate
+            # No password in the URL; pgx reads PGPASSWORD from the environment.
+            - name: DATABASE_URL
+              value: postgres://opspilot@postgres.data.svc.cluster.local:5432/opspilot?sslmode=disable
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres-auth, key: password }
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532        # distroless "nonroot" user; must be numeric for runAsNonRoot
+            runAsGroup: 65532
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]

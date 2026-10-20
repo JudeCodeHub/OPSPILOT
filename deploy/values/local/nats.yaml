@@ -1,0 +1,26 @@
+# Official NATS chart (nats-io/k8s), version 2.15.1. Only overrides are listed;
+# see all options with: helm show values nats/nats --version 2.15.1
+config:
+  jetstream:
+    enabled: true
+    fileStore:
+      pvc:
+        size: 1Gi                    # chart default is 10Gi: too much for a laptop
+        storageClassName: local-path
+
+container:
+  resources:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 128Mi }
+
+# Translates NATS stats (incl. JetStream consumer backlog) into Prometheus metrics.
+promExporter:
+  enabled: true
+  merge:
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { memory: 32Mi }
+
+# Toolbox pod with the `nats` CLI, for looking inside streams and consumers.
+natsBox:
+  enabled: true
