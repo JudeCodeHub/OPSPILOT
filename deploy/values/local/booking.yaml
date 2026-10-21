@@ -1,0 +1,22 @@
+# booking — seat holds and checkout (Postgres, Redis, NATS, payment).
+image:
+  repository: registry.localhost:5000/booking
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  # No password in the URL; pgx reads PGPASSWORD (from the Secret below).
+  # Crashloop scenario (Step 53): change the host to postgres-wrong.data.svc.cluster.local
+  DATABASE_URL: postgres://opspilot@postgres.data.svc.cluster.local:5432/opspilot?sslmode=disable
+  REDIS_ADDR: redis.data.svc.cluster.local:6379
+  NATS_URL: nats://nats.data.svc.cluster.local:4222
+  PAYMENT_URL: http://payment:8080
+  PAYMENT_TIMEOUT: 2s
+  HOLD_TTL_SECONDS: "300"
+  # failure switches (defaults = healthy)
+  DB_POOL_MAX: "10"
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  CPU_BURN: "false"
+secretEnv:
+  - { name: PGPASSWORD, secret: postgres-auth, key: password }

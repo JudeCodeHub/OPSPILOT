@@ -1,0 +1,21 @@
+# ticketing — issues tickets from booking.confirmed (Postgres, NATS).
+image:
+  repository: registry.localhost:5000/ticketing
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  # No password in the URL; pgx reads PGPASSWORD (from the Secret below).
+  DATABASE_URL: postgres://opspilot@postgres.data.svc.cluster.local:5432/opspilot?sslmode=disable
+  NATS_URL: nats://nats.data.svc.cluster.local:4222
+  # failure switches (defaults = healthy)
+  PROCESS_DELAY_MS: "0"
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  LEAK_MB_PER_MIN: "20"
+  CPU_BURN: "false"
+secretEnv:
+  - { name: PGPASSWORD, secret: postgres-auth, key: password }
+resources:
+  requests: { cpu: 50m, memory: 32Mi }
+  limits: { memory: 128Mi }     # leak scenario target: grows to this, then OOMKilled

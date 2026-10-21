@@ -1,0 +1,15 @@
+# gateway — public API (/api/*), forwards to events, booking, ticketing.
+image:
+  repository: registry.localhost:5000/gateway
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  EVENTS_URL: http://events:8080
+  BOOKING_URL: http://booking:8080
+  TICKETING_URL: http://ticketing:8080
+  UPSTREAM_TIMEOUT: 3s
+  # failure switches (defaults = healthy)
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  CPU_BURN: "false"

@@ -1,0 +1,13 @@
+# notify — "sends" emails from booking.confirmed + ticket.issued (NATS only).
+image:
+  repository: registry.localhost:5000/notify
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  NATS_URL: nats://nats.data.svc.cluster.local:4222
+  # failure switches (defaults = healthy)
+  PAUSE_CONSUMER: "false"
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  CPU_BURN: "false"

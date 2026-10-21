@@ -1,0 +1,17 @@
+# events — concerts and seat maps (Postgres + Redis holds).
+image:
+  repository: registry.localhost:5000/events
+  tag: 60e03da
+env:
+  LOG_LEVEL: info
+  # No password in the URL; pgx reads PGPASSWORD (from the Secret below).
+  DATABASE_URL: postgres://opspilot@postgres.data.svc.cluster.local:5432/opspilot?sslmode=disable
+  REDIS_ADDR: redis.data.svc.cluster.local:6379
+  # failure switches (defaults = healthy)
+  SLOW_QUERY_MS: "0"
+  FAIL_RATE: "0"
+  SLOW_MS: "0"
+  LEAK_MEMORY: "false"
+  CPU_BURN: "false"
+secretEnv:
+  - { name: PGPASSWORD, secret: postgres-auth, key: password }
